@@ -1,0 +1,1 @@
+nmap --script smb-vuln* -p 139,445 DC_IP
