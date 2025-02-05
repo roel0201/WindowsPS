@@ -1,0 +1,2 @@
+$env:COMPUTERNAME
+(Get-WmiObject Win32_ComputerSystem).DomainRole
