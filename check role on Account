@@ -1,0 +1,6 @@
+$role = Get-WmiObject -Class Win32_ComputerSystem
+if ($role.DomainRole -eq 5) {
+    Write-Host "This is a Domain Controller." -ForegroundColor Green
+} else {
+    Write-Host "This is NOT a Domain Controller." -ForegroundColor Red
+}
