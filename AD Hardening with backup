@@ -1,0 +1,92 @@
+# Run as Administrator on a Domain Controller
+# This script backs up security settings before applying changes
+
+$computers = Get-ADComputer -Filter * | Select-Object -ExpandProperty Name
+$dcName = (Get-ADDomainController).Name
+$backupFile = "C:\Domain_Hardening_Backup.txt"
+$logFile = "C:\Domain_Hardening_Report.txt"
+
+Write-Host "Starting Domain Hardening Process with Backup..." -ForegroundColor Cyan
+Out-File -FilePath $logFile -InputObject "Domain Hardening Report - $(Get-Date)" -Force
+Out-File -FilePath $backupFile -InputObject "Backup Before Hardening - $(Get-Date)" -Force
+
+foreach ($computer in $computers) {
+    Write-Host "[*] Backing up and hardening: $computer" -ForegroundColor Yellow
+    Invoke-Command -ComputerName $computer -ScriptBlock {
+
+        # --- 1. Backup Current Settings ---
+        Write-Host "[*] Backing up current security settings..."
+        $backup = @"
+        Computer: $env:COMPUTERNAME
+        SMBv1: $(Get-SmbServerConfiguration | Select-Object -ExpandProperty EnableSMB1Protocol)
+        SMB Signing Required: $(Get-SmbServerConfiguration | Select-Object -ExpandProperty RequireSecuritySignature)
+        NTLM Level: $(Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name LmCompatibilityLevel).LmCompatibilityLevel
+        LLMNR: $(Get-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient' -Name EnableMulticast).EnableMulticast
+        NetBIOS: $(Get-NetAdapterBinding -ComponentID ms_netbios | Select-Object -ExpandProperty Enabled)
+        LDAP Signing: $(Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\NTDS\Parameters' -Name LDAPServerIntegrity).LDAPServerIntegrity
+        Guest Access: $(Get-SmbServerConfiguration | Select-Object -ExpandProperty EnableSMBGuestAccess)
+        Firewall Rules: $(Get-NetFirewallRule -DisplayName 'Block SMB Inbound' -ErrorAction SilentlyContinue)
+        "@
+        Add-Content -Path "C:\Domain_Hardening_Backup.txt" -Value $backup
+
+        # --- 2. Disable SMBv1 (Prevent EternalBlue Attacks) ---
+        Write-Host "[+] Disabling SMBv1..."
+        Set-SmbServerConfiguration -EnableSMB1Protocol $false -Force
+        Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters" -Name SMB1 -Value 0 -Force
+
+        # --- 3. Enforce SMB Signing (Prevents MITM Attacks) ---
+        Write-Host "[+] Enforcing SMB Signing..."
+        Set-SmbServerConfiguration -RequireSecuritySignature $true
+        Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters" -Name RequireSecuritySignature -Value 1 -Force
+
+        # --- 4. Force NTLMv2 Authentication (Prevents NTLM Relay) ---
+        Write-Host "[+] Enforcing NTLMv2..."
+        Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name LmCompatibilityLevel -Value 5 -Force
+
+        # --- 5. Disable LLMNR & NetBIOS (Prevents Responder Attacks) ---
+        Write-Host "[+] Disabling LLMNR & NetBIOS..."
+        Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient" -Name EnableMulticast -Value 0 -Force
+        Get-NetAdapter | Set-NetAdapterBinding -ComponentID ms_netbios -Enabled $false
+
+        # --- 6. Enforce LDAP Signing (Prevents Man-in-the-Middle) ---
+        Write-Host "[+] Enforcing LDAP Signing..."
+        Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\NTDS\Parameters" -Name "LDAPServerIntegrity" -Value 2 -Force
+
+        # --- 7. Disable Guest & Anonymous Access ---
+        Write-Host "[+] Disabling Guest & Anonymous Access..."
+        Set-SmbServerConfiguration -EnableSMBGuestAccess $false
+        Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name RestrictAnonymous -Value 1 -Force
+
+        # --- 8. Block RDP Access for Non-Admins ---
+        Write-Host "[+] Restricting RDP Access..."
+        net localgroup "Remote Desktop Users" /delete "Domain Users"
+
+        # --- 9. Enable PowerShell Logging (Detect Malicious Scripts) ---
+        Write-Host "[+] Enabling PowerShell Logging..."
+        Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging" -Name EnableScriptBlockLogging -Value 1 -Force
+
+        # --- 10. Configure Windows Firewall (Block Unnecessary Ports) ---
+        Write-Host "[+] Enforcing Firewall Rules..."
+        New-NetFirewallRule -DisplayName "Block SMB Inbound" -Direction Inbound -Protocol TCP -LocalPort 445 -Action Block -ErrorAction SilentlyContinue
+        New-NetFirewallRule -DisplayName "Block RDP from External" -Direction Inbound -Protocol TCP -LocalPort 3389 -Action Block -RemoteAddress Any -ErrorAction SilentlyContinue
+
+        # --- 11. Enable Security Auditing (Detect Brute Force & Lateral Movement) ---
+        Write-Host "[+] Enabling Security Auditing..."
+        wevtutil sl "Microsoft-Windows-SMBServer/Audit" /e:true
+        auditpol /set /subcategory:"Logon" /success:enable /failure:enable
+        auditpol /set /subcategory:"Account Lockout" /success:enable /failure:enable
+        auditpol /set /subcategory:"Logoff" /success:enable /failure:enable
+
+    } -ErrorAction Continue
+
+    Write-Output "[*] Hardened: $computer" | Out-File -FilePath $logFile -Append
+}
+
+# --- 12. Apply Security Updates (Patch Vulnerabilities) ---
+Write-Host "[+] Applying Windows Updates (May take time)..." -ForegroundColor Green
+Invoke-Command -ComputerName $dcName -ScriptBlock {
+    Install-WindowsUpdate -AcceptAll -IgnoreReboot -Confirm:$false
+} -ErrorAction Continue
+
+Write-Host "[+] Domain Hardening Completed!" -ForegroundColor Green
+Write-Output "Domain Hardening Completed at $(Get-Date)" | Out-File -FilePath $logFile -Append
