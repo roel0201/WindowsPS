@@ -1,0 +1,21 @@
+Verify Red Team Persistence Cleanup
+
+heck for Suspicious Scheduled Tasks
+Run:
+
+Get-ScheduledTask | Where-Object { $_.Author -notmatch "Microsoft" }
+
+
+If you still see unauthorized services, manually stop and remove them:
+
+Stop-Service "MaliciousService" -Force
+sc.exe delete "MaliciousService"
+
+Check if Red Team Tools Are Running:
+
+Get-Process | Where-Object { $_.ProcessName -match "mimikatz|procdump|psexec|anydesk" }
+
+If any processes are still running, manually kill them:
+powershell
+
+Stop-Process -Name "mimikatz" -Force
