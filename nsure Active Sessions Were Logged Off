@@ -1,0 +1,6 @@
+query session
+
+
+If unknown users are still active, manually log them off:
+
+logoff [SESSION ID]
