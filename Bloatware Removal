@@ -1,5 +1,9 @@
-# Define a list of apps to remove
-$appsToRemove = @(
+# Run this in PowerShell as Administrator
+
+Write-Output "Starting bloatware removal..."
+
+# Safe list of pre-installed apps to remove
+$bloatwareApps = @(
     "Microsoft.3DBuilder",
     "Microsoft.BingWeather",
     "Microsoft.GetHelp",
@@ -20,13 +24,12 @@ $appsToRemove = @(
     "Microsoft.ZuneVideo",
     "Microsoft.WindowsFeedbackHub",
     "Microsoft.WindowsMaps",
-    "Microsoft.Tips"
+    "Microsoft.Tips",
+    "Microsoft.MSPaint"  # Paint 3D
 )
 
-foreach ($app in $appsToRemove) {
-    Write-Output "Attempting to remove $app..."
-    # Remove for current user
-    Get-AppxPackage -Name $app -AllUsers | Remove-AppxPackage -ErrorAction SilentlyContinue
-    # Remove provisioned package
-    Get-AppxProvisionedPackage -Online | Where-Object {$_.DisplayName -eq $app} | Remove-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue
-}
+# Remove for all users and from system image
+foreach ($app in $bloatwareApps) {
+    Write-Output "Removing $app..."
+    
+    # Remove
