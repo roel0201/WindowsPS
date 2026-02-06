@@ -1,0 +1,27 @@
+function Patch-Mimikatz {
+    try {
+        # Define the registry key path
+        $registryPath = "HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest"
+
+        # Check if the registry key exists
+        if (Test-Path $registryPath) {
+            # Check if the UseLogonCredential value exists
+            $useLogonCredentialExists = Get-ItemProperty -Path $registryPath -Name "UseLogonCredential" -ErrorAction SilentlyContinue
+
+            if ($useLogonCredentialExists -eq $null) {
+                # Create the UseLogonCredential value and set it to 0
+                New-ItemProperty -Path $registryPath -Name "UseLogonCredential" -Value 0 -PropertyType DWord | Out-Null
+            } else {
+                # Set the UseLogonCredential value to 0
+                Set-ItemProperty -Path $registryPath -Name "UseLogonCredential" -Value 0 -Type DWord
+            }
+        } else {
+            Write-Host "Registry key path not found: $registryPath"
+        }
+        Update-Log "Patch Mimikatz" "Executed successfully"
+    } catch {
+        Write-Host $_.Exception.Message -ForegroundColor Yellow
+        Write-Host "Error Occurred..."
+        Update-Log "Patch Mimikatz" "Failed with error: $($_.Exception.Message)"
+    }
+}
